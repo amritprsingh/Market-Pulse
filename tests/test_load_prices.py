@@ -131,3 +131,62 @@ def test_failed_load_rolls_back_every_chunk(engine, test_securities):
     with pytest.raises(Exception):
         upsert_prices(frame, engine, chunk_size=2)
     assert stored_rows(engine) == []
+
+
+def high_priced_frame():
+    """One row priced so a 1e-6 relative move survives NUMERIC(14,4) rounding."""
+    frame = prices_frame().iloc[:1].copy()
+    frame[["open", "high", "low", "close", "adj_close"]] = 1000.0
+    return frame
+
+
+def reload_with(engine, column, value):
+    """Load a row, reload it with one value changed; return counts and both rows."""
+    upsert_prices(high_priced_frame(), engine)
+    before = stored_rows(engine)[0]
+    changed = high_priced_frame()
+    changed[column] = changed[column].astype(object)
+    changed.loc[0, column] = value
+    changed = changed.astype(high_priced_frame().dtypes.to_dict())
+    counts = upsert_prices(changed, engine)
+    return counts, before, stored_rows(engine)[0]
+
+
+def test_adj_close_jitter_leaves_the_row_and_loaded_at_alone(engine, test_securities):
+    counts, before, after = reload_with(engine, "adj_close", 1000.0 * (1 + 1e-6))
+    assert counts == (0, 0)
+    assert after == before
+
+
+def test_real_adj_close_change_updates_the_row(engine, test_securities):
+    counts, before, after = reload_with(engine, "adj_close", 1000.0 * (1 + 1e-3))
+    assert counts == (0, 1)
+    assert after["adj_close"] == Decimal("1001.0000")
+    assert after["loaded_at"] > before["loaded_at"]
+
+
+@pytest.mark.parametrize(
+    "column,value",
+    [
+        ("open", 1000.0001),
+        ("high", 1000.0001),
+        ("low", 999.9999),
+        ("close", 1000.0001),
+        ("volume", 1001),
+    ],
+)
+def test_smallest_change_in_other_columns_updates_the_row(
+    engine, test_securities, column, value
+):
+    counts, before, after = reload_with(engine, column, value)
+    assert counts == (0, 1)
+    assert after[column] != before[column]
+    assert after["loaded_at"] > before["loaded_at"]
+
+
+def test_adj_close_gaining_or_losing_a_value_updates_the_row(engine, test_securities):
+    counts, _, after = reload_with(engine, "adj_close", np.nan)
+    assert counts == (0, 1)
+    assert after["adj_close"] is None
+    assert upsert_prices(high_priced_frame(), engine) == (0, 1)
+    assert stored_rows(engine)[0]["adj_close"] == Decimal("1000.0000")

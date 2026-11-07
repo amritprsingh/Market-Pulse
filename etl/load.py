@@ -3,14 +3,28 @@
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import Engine, MetaData, Table, func, literal_column, or_, text
+from sqlalchemy import (
+    ColumnElement,
+    Engine,
+    MetaData,
+    Table,
+    and_,
+    func,
+    literal_column,
+    or_,
+    text,
+)
 from sqlalchemy.dialects.postgresql import insert
 
 from etl.db import get_engine
 
 SEED_PATH = Path(__file__).resolve().parent.parent / "seeds" / "tickers.csv"
 PRICE_FIELDS = ["open", "high", "low", "close", "adj_close", "volume"]
+EXACT_MATCH_FIELDS = ["open", "high", "low", "close", "volume"]
 CHUNK_SIZE = 1000
+# Relative. Above the source's adj_close jitter between identical pulls (about 8e-6)
+# and below real dividend adjustments, so only real revisions count as changes.
+ADJ_CLOSE_UPDATE_TOLERANCE = 5e-5
 
 UPSERT_SECURITY = text("""
     INSERT INTO dim_security (ticker, company_name, sector, industry)
@@ -32,13 +46,21 @@ def load_dim_security(engine: Engine | None = None) -> int:
     return len(rows)
 
 
+def adj_close_changed(stored: ColumnElement, incoming: ColumnElement) -> ColumnElement:
+    """True when adj_close moved beyond the tolerance, or became null or non-null."""
+    return or_(
+        func.abs(stored - incoming) > ADJ_CLOSE_UPDATE_TOLERANCE * func.abs(incoming),
+        and_(stored.is_distinct_from(incoming), or_(stored.is_(None), incoming.is_(None))),
+    )
+
+
 def upsert_prices(
     df: pd.DataFrame, engine: Engine | None = None, chunk_size: int = CHUNK_SIZE
 ) -> tuple[int, int]:
     """Upsert prices in one transaction and return (rows_inserted, rows_updated).
 
-    Rows whose values already match are left alone, so rows_updated and loaded_at
-    reflect real revisions rather than every row in the catch-up window.
+    Rows with no real change are left alone, so rows_updated and loaded_at reflect
+    revisions rather than every re-fetched row or adj_close jitter.
     """
     engine = engine or get_engine()
     table = Table("fact_daily_price", MetaData(), autoload_with=engine)
@@ -58,8 +80,9 @@ def upsert_prices(
                 where=or_(
                     *(
                         table.c[field].is_distinct_from(statement.excluded[field])
-                        for field in PRICE_FIELDS
-                    )
+                        for field in EXACT_MATCH_FIELDS
+                    ),
+                    adj_close_changed(table.c.adj_close, statement.excluded.adj_close),
                 ),
             ).returning(literal_column("xmax = 0").label("inserted"))
             # xmax is 0 only on rows this statement newly inserted.
