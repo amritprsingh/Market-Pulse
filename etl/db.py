@@ -1,4 +1,4 @@
-"""Database connection and schema setup. Run `python -m etl.db` to apply the schema."""
+"""Database connection and setup. Run `python -m etl.db` to apply the schema and views."""
 
 import os
 from pathlib import Path
@@ -6,7 +6,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import Engine, create_engine
 
-SCHEMA_PATH = Path(__file__).resolve().parent.parent / "sql" / "schema.sql"
+SQL_DIR = Path(__file__).resolve().parent.parent / "sql"
+SCHEMA_PATH = SQL_DIR / "schema.sql"
+VIEWS_PATH = SQL_DIR / "views.sql"
 
 
 def get_engine() -> Engine:
@@ -17,12 +19,22 @@ def get_engine() -> Engine:
     return create_engine(url)
 
 
-def apply_schema(engine: Engine | None = None) -> None:
+def apply_sql_file(path: Path, engine: Engine | None = None) -> None:
     engine = engine or get_engine()
     with engine.begin() as conn:
-        conn.exec_driver_sql(SCHEMA_PATH.read_text())
+        conn.exec_driver_sql(path.read_text())
+
+
+def apply_schema(engine: Engine | None = None) -> None:
+    apply_sql_file(SCHEMA_PATH, engine)
+
+
+def apply_views(engine: Engine | None = None) -> None:
+    apply_sql_file(VIEWS_PATH, engine)
 
 
 if __name__ == "__main__":
     apply_schema()
     print(f"Applied {SCHEMA_PATH.name}")
+    apply_views()
+    print(f"Applied {VIEWS_PATH.name}")
