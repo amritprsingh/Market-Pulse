@@ -1,6 +1,11 @@
-"""Build seeds/tickers.csv: 10 validated S&P 500 tickers from each GICS sector.
+"""Build seeds/tickers.csv: the 10 most liquid S&P 500 tickers in each GICS sector.
 
-Run with `python -m etl.seed_tickers`.
+Liquidity is average daily dollar volume (close * volume) over the last 3 months.
+
+seeds/tickers.csv is a frozen snapshot generated on 2026-11-06. Commit it; do not
+regenerate it on every run. Rankings shift daily, so re-running changes the universe.
+
+Run with `python -m etl.seed_tickers` only to deliberately take a new snapshot.
 """
 
 from io import StringIO
@@ -24,6 +29,7 @@ SOURCE_COLUMNS = {
 }
 TICKERS_PER_SECTOR = 10
 SECTOR_COUNT = 11
+BATCH_SIZE = 50
 
 
 def fetch_constituents() -> pd.DataFrame:
@@ -36,35 +42,40 @@ def fetch_constituents() -> pd.DataFrame:
     return constituents
 
 
-def has_price_data(ticker: str) -> bool:
-    prices = yf.download(
-        ticker, period="1mo", interval="1d", auto_adjust=False, progress=False
-    )
-    return prices is not None and not prices.dropna(how="all").empty
-
-
-def select_sector(candidates: pd.DataFrame) -> pd.DataFrame:
-    """Take the first tickers in table order that return data."""
-    selected = []
-    for position, row in candidates.iterrows():
-        if has_price_data(row["ticker"]):
-            selected.append(position)
-        else:
-            print(f"No data for {row['ticker']}; trying next in {row['sector']}")
-        if len(selected) == TICKERS_PER_SECTOR:
-            return candidates.loc[selected]
-    sector = candidates["sector"].iloc[0]
-    raise RuntimeError(f"Only {len(selected)} valid tickers in {sector}")
+def average_dollar_volume(tickers: list[str]) -> pd.Series:
+    """Average daily close * volume per ticker; tickers with no data are left out."""
+    averages = []
+    for start in range(0, len(tickers), BATCH_SIZE):
+        batch = tickers[start : start + BATCH_SIZE]
+        prices = yf.download(
+            batch, period="3mo", interval="1d", auto_adjust=False, progress=False
+        )
+        averages.append((prices["Close"] * prices["Volume"]).mean())
+    return pd.concat(averages).dropna()
 
 
 def build_universe(constituents: pd.DataFrame) -> pd.DataFrame:
-    sectors = constituents["sector"].unique()
-    if len(sectors) != SECTOR_COUNT:
-        raise RuntimeError(f"Expected {SECTOR_COUNT} sectors, found {len(sectors)}")
-    return pd.concat(
-        select_sector(constituents[constituents["sector"] == sector])
-        for sector in sectors
-    )
+    """Keep the top tickers by dollar volume in each sector, most liquid first."""
+    sector_count = constituents["sector"].nunique()
+    if sector_count != SECTOR_COUNT:
+        raise RuntimeError(f"Expected {SECTOR_COUNT} sectors, found {sector_count}")
+
+    dollar_volume = average_dollar_volume(constituents["ticker"].tolist())
+    skipped = sorted(set(constituents["ticker"]) - set(dollar_volume.index))
+    if skipped:
+        print(f"Skipped {len(skipped)} tickers with no data: {skipped}")
+
+    ranked = constituents.assign(
+        dollar_volume=constituents["ticker"].map(dollar_volume)
+    ).dropna(subset=["dollar_volume"])
+    ranked = ranked.sort_values(["sector", "dollar_volume"], ascending=[True, False])
+    universe = ranked.groupby("sector").head(TICKERS_PER_SECTOR)
+
+    counts = universe["sector"].value_counts()
+    short = counts[counts < TICKERS_PER_SECTOR]
+    if not short.empty:
+        raise RuntimeError(f"Too few tickers with data: {short.to_dict()}")
+    return universe.drop(columns="dollar_volume")
 
 
 def main() -> None:
