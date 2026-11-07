@@ -5,7 +5,7 @@ with automated data quality checks, SQL reconciliation, and a Tableau dashboard 
 
 ## Stack (do not add other technologies without asking)
 Python 3.12, Pandas, SQL, PostgreSQL 16, Tableau. Libraries: SQLAlchemy 2.x, psycopg 3,
-yfinance, python-dotenv, pytest. Scheduling is a plain Python job (launchd or cron later).
+yfinance, python-dotenv, pytest. Scheduling is a plain Python job run by launchd.
 
 ## Environment
 - macOS on Apple Silicon. Always use the venv at .venv (Python 3.12).
@@ -25,6 +25,16 @@ yfinance, python-dotenv, pytest. Scheduling is a plain Python job (launchd or cr
 
 ## Layout
 sql/ (schema.sql, views.sql), etl/, seeds/tickers.csv, tests/, data/ (gitignored), logs/
+
+## Scheduling
+- launchd runs scripts/run_daily.sh Monday to Friday at 18:30 local time (catch-up window)
+  and scripts/run_weekly.sh Saturday at 10:00 local time (--refresh-history).
+- Plists are in launchd/. Install with scripts/install_launchd.sh, remove with
+  scripts/uninstall_launchd.sh. Plist paths are absolute; update them if the repo moves.
+- Logs: logs/daily.log, logs/weekly.log, logs/etl.log, and launchd's own
+  logs/launchd.*.log. All jobs share one lock, logs/.run.lock.
+- A Mac asleep at the scheduled time runs the job when it wakes. A Mac that is powered
+  off skips it, and the 7-day catch-up window covers the gap.
 
 ## Commands
 - Run tests: pytest -q
