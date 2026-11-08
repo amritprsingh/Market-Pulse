@@ -56,7 +56,7 @@ views feed a Tableau dashboard.
 ## Results
 
 <!-- results:start -->
-**30-day window in progress: 0 days complete**
+**30-day window in progress:**
 
 Generated with `python -m etl.report --days 30`. Every figure below comes
 from etl_run_log, dq_check_result, reconciliation_result and
