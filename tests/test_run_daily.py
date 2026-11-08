@@ -184,6 +184,17 @@ def test_dq_failure_and_mismatch_are_recorded_without_failing_the_run(
     assert mismatched == 1
 
 
+@pytest.mark.parametrize("trigger,expected", [("launchd", "launchd"), (None, "manual")])
+def test_run_records_what_triggered_it(engine, run_ids, monkeypatch, trigger, expected):
+    if trigger:
+        monkeypatch.setenv(run_daily.TRIGGER_ENV, trigger)
+    else:
+        monkeypatch.delenv(run_daily.TRIGGER_ENV, raising=False)
+    patch_steps(monkeypatch, failed=[])
+    run_daily.run(engine=engine)
+    assert logged_run(engine, run_ids[0])["triggered_by"] == expected
+
+
 def test_refresh_history_is_a_two_year_backfill():
     assert run_daily.parse_args(["--refresh-history"]).backfill_years == 2
 

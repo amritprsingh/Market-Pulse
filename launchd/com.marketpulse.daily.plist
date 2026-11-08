@@ -58,5 +58,10 @@
 	<string>/Users/amritpreetsingh/projects/marketpulse/logs/launchd.daily.out.log</string>
 	<key>StandardErrorPath</key>
 	<string>/Users/amritpreetsingh/projects/marketpulse/logs/launchd.daily.err.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>MARKETPULSE_TRIGGER</key>
+		<string>launchd</string>
+	</dict>
 </dict>
 </plist>

@@ -7,6 +7,7 @@
 
 import argparse
 import logging
+import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -25,6 +26,8 @@ CATCH_UP_DAYS = 7
 REFRESH_HISTORY_YEARS = 2
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 LOG_PATH = Path(__file__).resolve().parent.parent / "logs" / "etl.log"
+# Set to 'launchd' by the plists; anything started by hand is recorded as 'manual'.
+TRIGGER_ENV = "MARKETPULSE_TRIGGER"
 
 log = logging.getLogger(__name__)
 
@@ -39,9 +42,14 @@ def date_window(backfill_years: int | None, today: date) -> tuple[date, date]:
 
 
 def start_run(engine: Engine) -> int:
+    query = text("""
+        INSERT INTO etl_run_log (status, triggered_by)
+        VALUES ('running', :triggered_by)
+        RETURNING run_id
+    """)
+    triggered_by = os.environ.get(TRIGGER_ENV, "manual")
     with engine.begin() as conn:
-        query = text("INSERT INTO etl_run_log (status) VALUES ('running') RETURNING run_id")
-        return conn.execute(query).scalar_one()
+        return conn.execute(query, {"triggered_by": triggered_by}).scalar_one()
 
 
 def finish_run(engine: Engine, run_id: int, **fields) -> None:

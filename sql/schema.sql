@@ -53,3 +53,8 @@ CREATE TABLE IF NOT EXISTS reconciliation_result (
     discrepancy_pct NUMERIC(7,4) NOT NULL,
     checked_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Who started a run: 'launchd' (set by the plists) or 'manual'. Existing rows predate
+-- scheduling and were all started by hand, so the default is correct for them too.
+ALTER TABLE etl_run_log
+    ADD COLUMN IF NOT EXISTS triggered_by TEXT NOT NULL DEFAULT 'manual';

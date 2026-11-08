@@ -90,3 +90,7 @@ def upsert_prices(
                 rows_inserted += inserted
                 rows_updated += not inserted
     return rows_inserted, rows_updated
+
+
+if __name__ == "__main__":
+    print(f"Loaded {load_dim_security()} securities from {SEED_PATH.name}")
